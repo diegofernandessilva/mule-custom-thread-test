@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:anypoint-mq="http://www.mulesoft.org/schema/mule/anypoint-mq" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/anypoint-mq http://www.mulesoft.org/schema/mule/anypoint-mq/current/mule-anypoint-mq.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd">
+    <http:listener-config name="HTTP_Listener_Configuration" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration" />
+    <db:generic-config name="Database_SQLServer_Configuration" url="jdbc:sqlserver://${db.credentials.host}:${db.credentials.port};databaseName=${db.credentials.databaseName};user=${db.credentials.user};password=${db.credentials.pwd}" driverClassName="com.microsoft.sqlserver.jdbc.SQLServerDriver" doc:name="Generic Database Configuration"/>
+    <db:mysql-config name="Database_MySQL_Configuration" host="mysqldb-gp.cvoqa4kkscsw.us-east-1.rds.amazonaws.com" port="3306" user="admin" password="adminGP2017" database="multithread_gp_teste" doc:name="MySQL Configuration">
+        <db:pooling-profile maxPoolSize="50"/>
+    </db:mysql-config>
+    <anypoint-mq:config name="Anypoint_MQ_Configuration" doc:name="Anypoint MQ Configuration" clientMode="ASYNC">
+        <anypoint-mq:provider url="https://mq-us-east-1.anypoint.mulesoft.com/api/v1" clientId="839f83753c454b9e8ae4bf0bccd39a98" clientSecret="5e1a0961B4FD4C2Eb0ECe761E3c628ab"/>
+    </anypoint-mq:config>
+    
+    <queued-asynchronous-processing-strategy name="allow100Threads" maxThreads="100"  minThreads="20" doc:name="Queued Asynchronous Processing Strategy"/>
+    <flow name="teste-multithreadgpFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/sync-threads" doc:name="HTTP"/>
+        <logger message="Iniciando sele&#231;&#227;o do database origem..." level="INFO" doc:name="Logger"/>
+        <db:select config-ref="Database_SQLServer_Configuration" doc:name="Database">
+            <db:parameterized-query><![CDATA[SELECT
+TOP 100000
+	   c.emp_Empresa_int_FK as emp
+	  ,c.cmd_NumeroComodato_int as idpedido
+	 FROM [T_XMLINK_GP].[dbo].[TB_ITP_XML_ComodatoItem_cit] c with (nolock)]]></db:parameterized-query>
+        </db:select>
+        <set-payload value="#[payload]" doc:name="Set Payload"/>
+        <foreach doc:name="For Each">
+            <logger message="Entrando na VM pedido #[payload.idpedido] em #[server.dateTime.format(&quot;yyyy-MM-dd HH:mm:ss.SSS&quot;)]" level="INFO" doc:name="Logger"/>
+            <vm:outbound-endpoint exchange-pattern="one-way" path="/vmthreads" doc:name="VM"/>
+        </foreach>
+       
+     
+    </flow>
+    <flow name="teste-multithreadgpFlow2" processingStrategy="allow100Threads">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="/vmthreads" doc:name="VM"/>
+        <json:object-to-json-transformer doc:name="Object to JSON"/>
+        <logger message="Saindo da VM pedido: #[json:idpedido] em #[server.dateTime.format(&quot;yyyy-MM-dd HH:mm:ss.SSS&quot;)]" level="INFO" doc:name="Logger"/>
+        <db:insert config-ref="Database_MySQL_Configuration" doc:name="Database">
+            <db:parameterized-query><![CDATA[INSERT INTO itens_pedido (emp, idpedido)
+VALUES (#[json:emp], #[json:idpedido]);]]></db:parameterized-query>
+        </db:insert>
+        <logger message="Ap&#243;s gravar db #[payload] #[server.dateTime.format(&quot;yyyy-MM-dd HH:mm:ss.SSS&quot;)]" level="INFO" doc:name="Logger"/>
+    </flow>
+</mule>
